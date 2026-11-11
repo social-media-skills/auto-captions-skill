@@ -1,0 +1,65 @@
+name: test
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  pipeline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.12"]
+        exclude:      # GitHub's current Ubuntu image has no Python 3.9; 3.9 runs on macOS and Windows
+          - os: ubuntu-latest
+            python: "3.9"
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install ffmpeg
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y ffmpeg; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ffmpeg; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then choco install ffmpeg -y --no-progress; fi
+      - run: pip install pillow tzdata arabic-reshaper python-bidi
+      - name: No local paths in the skill
+        run: "! grep -rnE '/Users/|/home/[a-z]|[A-Za-z]:[\\\\/]Users' skills/ README.md --include='*.md' --include='*.py' --include='*.json' --include='*.txt' --include='*.srt'"
+      - name: Only documented media (no personal files)
+        run: python tests/check_media.py
+      - name: Full pipeline (transcribe from subtitles, fix, captions, translate, styles, render, post plan)
+        run: python tests/run_pipeline.py
+  whisper:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update && sudo apt-get install -y ffmpeg; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ffmpeg; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then choco install ffmpeg -y --no-progress; fi
+      - run: pip install pillow faster-whisper
+      - name: Real transcription of the example clips (faster-whisper, tiny model)
+        run: python tests/whisper_check.py
+  old-pillow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg && pip install "pillow==9.1.1" tzdata
+      - name: Full pipeline with the oldest supported Pillow
+        run: python tests/run_pipeline.py

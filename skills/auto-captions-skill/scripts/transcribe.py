@@ -45,6 +45,17 @@ def extract_audio(src, dst, start=None, length=None, bitrate="48k"):
         die(f"could not read the audio of {src}; does it have a sound track?")
 
 
+def pcm16k(src):
+    """The audio as 16 kHz mono float samples, decoded by ffmpeg (what Whisper models take)."""
+    import numpy as np
+    cmd = ["ffmpeg", "-v", "error", "-i", src, "-map", f"0:a:{probe(src)['audio_index']}", "-vn", "-ac", "1",
+           "-ar", "16000", "-f", "f32le", "-"]
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        die(f"could not read the audio of {src}; does it have a sound track?")
+    return np.frombuffer(r.stdout, dtype=np.float32).copy()
+
+
 # ---------- routes ----------
 
 SCRIPTS = [("ja", "\u3040-\u30ff"), ("ko", "\uac00-\ud7af"), ("zh", "\u4e00-\u9fff"), ("ar", "\u0600-\u06ff"),
@@ -260,8 +271,7 @@ def via_local(src, tmp, model, lang, vocab):
     except ImportError:
         die("Local transcription needs faster-whisper: pip install faster-whisper\n"
             "Or set GROQ_API_KEY or DEEPGRAM_API_KEY, or give the video's own .srt/.vtt subtitles.")
-    audio = os.path.join(tmp, "audio.mp3")
-    extract_audio(src, audio, bitrate="64k")
+    audio = pcm16k(src)  # decoded by ffmpeg, so faster-whisper's own decoder (PyAV) is never needed
     name = "large-v3-turbo" if model == "turbo" else model
     print(f"  transcribing locally with faster-whisper '{name}' (first run downloads the model)...", flush=True)
     m = WhisperModel(name, device="cpu", compute_type="int8")
